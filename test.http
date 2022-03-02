@@ -1,0 +1,28 @@
+####
+GET http://localhost:3000/
+
+####
+GET http://localhost:3000/parres-democlase
+
+####
+POST http://localhost:3000/
+content-type: application/json
+
+{
+    "Bucket": "aparres-ejemplo1"
+}
+
+####
+POST http://localhost:3000/aparres-ejemplo1
+content-type: multipart/form-data; boundary=----ARCHIVO
+
+------ARCHIVO
+Content-Disposition: form-data; name="key"
+
+key=test.http
+------ARCHIVO
+Content-Disposition: form-data; name="file"; filename="test.http"
+Content-Type: text/plain
+
+< ./test.http
+------ARCHIVO--
