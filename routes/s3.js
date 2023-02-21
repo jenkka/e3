@@ -2,13 +2,12 @@ var express = require('express');
 var router = express.Router();
 var s3 = require('@aws-sdk/client-s3');
 
-const { ListBucketsCommand } = require('@aws-sdk/client-s3');
+const { ListBucketsCommand, ListObjectsCommand, GetObjectCommand, CreateBucketCommand, S3LocationFilterSensitiveLog, PutObjectCommand, PutObjectLockConfigurationCommand, NoSuchKey } = require('@aws-sdk/client-s3');
 const s3Client = new s3.S3Client({region: "us-east-1"});
 
 var fileUpload = require('express-fileupload');
 router.use(fileUpload());
 
-/* GET LIST OF BUCKETS */
 router.get('/', async function(req, res) {
   try {
     let data = await s3Client.send(new ListBucketsCommand({}));
@@ -19,72 +18,105 @@ router.get('/', async function(req, res) {
 });
 
 router.get('/:bucket/', async function(req, res) {
-  /*
-   * @TODO - Programa la logica para obtener los objetos de un bucket.
-   *         Se debe tambien generar una nueblo templade en jade para presentar
-   *         esta información. Similar al que lista los Buckets.
-   * 
-   *         El nombre del bucket lo recibimos en req.params.bucket
-   */
+  try {
+    let params = {
+      Bucket: req.params.bucket
+    }
 
+    let data = await s3Client.send(new ListObjectsCommand(params));
+    res.render('listObjects', {bucketName: req.params.bucket, objects: data.Contents})
+  } catch (err) {
+    res.render('error', {error: err})
+  }
 });
 
 router.get('/:bucket/:key', async function(req, res) {
-  
-  /*
-   * @TODO - Programa la logica para obtener un objeto en especifico
-   * es importante a la salida enviar el tipo de respuesta y el contenido
-   * el cual nos llegara como un Buffer.
-   * 
-   * Ejemplo de esto:
-   *     res.type(...) --> Enviar el elemento ContentType de la respuesta.
-   *     
-   *     El elemento Body de la respueta en si es un stream, por lo que debemos
-   *     enviarlo de la siguiente forma:
-   * 
-   *     bodyStream.on("data", (chunk) => res.write(chunk));
-   *     bodyStream.once("end", () => {
-   *           res.end();
-   *      });
-   *      bodyStream.once("error", () => {
-   *           res.end();
-   *      });
-   *      
-   */    
+  try {
+    const params = {
+      Bucket: req.params.bucket,
+      Key: req.params.key
+    };
 
+    const data = await s3Client.send(new GetObjectCommand(params));
+    res.type(data.ContentType);
+    data.Body.once('error', err => reject(err));
+    data.Body.on('data', data => res.write(data));
+    data.Body.once('end', () => res.end());
+
+  } catch (err) {
+    console.log("Error", err);
+  }
 });
 
 
 router.post('/', async function(req,res) {
-  /*
-   * @TODO - Programa la logica para crear un Bucket.
-   *
-   * La información que es enviada el CUERPO del post se recibe en req.body
-   */ 
+  let params = {
+    Bucket: req.body.Bucket
+  }
+
+  try {
+    const data = await s3Client.send(new CreateBucketCommand(params));
+    console.log("The bucket " + req.body.Bucket + " has been created.");
+    return data;
+  } catch (err) {
+    console.log("Error", err);
+  }
 });
 
-router.post('/:bucket', async function(req,res) {
+router.post('/:bucket', async function(req,res) {  
+  try {
+    const {Readable} = require('stream');
 
-  /*
-   * @TODO - Programa la logica para crear un nuevo objeto.
-   * TIPS:
-   *  req.files contiene todo los archivos enviados mediante post.
-   *  cada elemento de files contiene multiple información algunos campos
-   *  importanets son:
-   *      data -> Buffer con los datos del archivo.
-   *      name -> Nombre del archivo original
-   *      mimetype -> tipo de archivo.
-   *  el conjunto files dentro del req es generado por el modulo 
-   *  express-fileupload
-   * 
-   *  El comando PutObjectCommand requiere un STREAM para recibir un archivo
-   *  para convertir el Buffer que nos llega a un stream se puede usar lo
-   *  siguiente:
-   * 
-   *  const {Readable} = require("stream");
-   *  Readable.from(buffer.toString());
-  */
-   
+    req.files.file.forEach(async e => {
+      const readable = Readable.from(e.data.toString());
+      
+      // Check if file already exists
+      let count = 0;
+      let success = false;
+      let fileName = e.name;
+
+      do {
+        if (count > 0) {
+          fileName = count + "-" + e.name
+        }
+
+        const eParams = {
+          Bucket: req.params.bucket,
+          Key: fileName
+        }
+
+        try {
+          await s3Client.send(new GetObjectCommand(eParams));
+          console.log("Searching for another file name")
+          count++;
+        } catch (e) {
+          success = true;
+        }
+      } while (success == false);
+      
+      // Upload file
+      const params = {
+        Bucket: req.params.bucket,
+        Key: fileName,
+        Body: readable,
+        ContentType: e.mimetype,
+        ContentLength: e.data.length
+      }
+      await s3Client.send(new PutObjectCommand(params));
+
+      console.log(
+        "Successfully uploaded object: " +
+          params.Bucket +
+          "/" +
+          params.Key
+      );
+    });
+  } catch (err) {
+    console.log("Error", err);
+  }
+
+  res.status(200);
+  res.send("Done");
 });
 
 module.exports = router;
